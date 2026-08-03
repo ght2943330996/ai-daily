@@ -9,4 +9,10 @@
 
 cd "$(dirname "$0")" || exit 1
 
-/usr/bin/python3 send_ai_daily.py >> push.log 2>&1
+# GitHub Actions 环境下直接把输出打到运行日志（便于排查）；
+# 本地运行时把日志写入 push.log。
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    /usr/bin/python3 send_ai_daily.py
+else
+    /usr/bin/python3 send_ai_daily.py >> push.log 2>&1
+fi
