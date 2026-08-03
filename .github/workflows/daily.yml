@@ -1,0 +1,34 @@
+name: AI日报定时推送
+
+on:
+  schedule:
+    # 每天早上 8:00（中国时区 UTC+8）——GitHub Actions 的 cron 按 UTC 计算，0 时 UTC = 8 时 +8
+    - cron: '0 0 * * *'
+  workflow_dispatch: {}   # 支持手动触发测试
+
+permissions:
+  contents: read
+
+jobs:
+  send-daily:
+    name: 推送 AI日报 + 工具速报
+    runs-on: macos-latest
+    env:
+      DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 运行推送脚本（失败自动重试 3 次）
+        shell: bash
+        run: |
+          # 定时任务偶发网络抖动，发送失败重试，最多 3 次、间隔 60 秒
+          for attempt in 1 2 3; do
+            if bash run.sh; then
+              exit 0
+            fi
+            echo "第 $attempt 次运行失败，60 秒后重试..."
+            sleep 60
+          done
+          echo "连续 3 次失败，请查看上方日志" >&2
+          exit 1
