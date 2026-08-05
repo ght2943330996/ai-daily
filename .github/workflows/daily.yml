@@ -2,12 +2,14 @@ name: AI日报定时推送
 
 on:
   schedule:
-    # 每天早上 8:00（中国时区 UTC+8）——GitHub Actions 的 cron 按 UTC 计算，0 时 UTC = 8 时 +8
-    - cron: '0 0 * * *'
+    # 每天 07:47（中国时区 UTC+8）——GitHub Actions 的 cron 按 UTC 计算，23:47 UTC = 次日 07:47 +8。
+    # 刻意避开整点：GitHub 的 schedule 在整点（尤其 00:00 UTC）排队高峰，可能延迟数小时甚至漏跑。
+    # 发送成功后会更新 last_sent.txt 标记，由 catchup.yml 在 10:17 兜底补发。
+    - cron: '47 23 * * *'
   workflow_dispatch: {}   # 支持手动触发测试
 
 permissions:
-  contents: read
+  contents: write   # 发送成功后把 last_sent.txt 提交回仓库，供 catchup.yml 判断
 
 jobs:
   send-daily:
@@ -15,6 +17,8 @@ jobs:
     runs-on: macos-latest
     env:
       DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
+      # 23:47 UTC 触发时 UTC 日期比北京时间落后一天，必须用北京时区取"今天"
+      TZ: Asia/Shanghai
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -32,3 +36,15 @@ jobs:
           done
           echo "连续 3 次失败，请查看上方日志" >&2
           exit 1
+
+      # 只有上一步发送成功才会执行到这里；发送失败时标记不更新，
+      # catchup.yml 会在 10:17 检测到"今天未发送"并自动补发。
+      - name: 写入发送标记
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "$(date +%F)" > last_sent.txt
+          git add last_sent.txt
+          git commit -m "标记 $(date +%F) 日报已发送"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"

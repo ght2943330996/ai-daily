@@ -1,0 +1,47 @@
+name: AI日报补发兜底
+
+on:
+  schedule:
+    # 每天 10:17（中国时区 UTC+8）——02:17 UTC = 10:17 +8，刻意避开整点。
+    # 主发（daily.yml）在 07:47；若其被 GitHub schedule 延迟/漏跑而未发送（last_sent.txt 不是今天），此处自动补发。
+    - cron: '17 2 * * *'
+  workflow_dispatch: {}   # 支持手动触发补发
+
+permissions:
+  contents: write   # 补发成功后同样更新 last_sent.txt
+
+jobs:
+  catchup:
+    name: 检测并补发
+    runs-on: macos-latest
+    env:
+      DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
+      TZ: Asia/Shanghai   # 与 daily.yml 一致，取北京时间日期
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 当天未发送则补发（失败自动重试 3 次）
+        shell: bash
+        run: |
+          today=$(date +%F)
+          if [ -f last_sent.txt ] && [ "$(cat last_sent.txt)" = "$today" ]; then
+            echo "今天（$today）已由主流程发送，跳过补发"
+            exit 0
+          fi
+          echo "今天（$today）尚未发送，开始补发"
+          for attempt in 1 2 3; do
+            if bash run.sh; then
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              echo "$today" > last_sent.txt
+              git add last_sent.txt
+              git commit -m "补发 $today 日报"
+              git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"
+              exit 0
+            fi
+            echo "第 $attempt 次补发失败，60 秒后重试..."
+            sleep 60
+          done
+          echo "连续 3 次补发失败，请查看上方日志" >&2
+          exit 1
